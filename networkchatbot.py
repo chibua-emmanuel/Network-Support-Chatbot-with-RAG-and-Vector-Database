@@ -1,8 +1,5 @@
 
 
-
-
-
 import os
 import streamlit as st
 from PyPDF2 import PdfReader
@@ -14,7 +11,7 @@ import openai
 from tqdm import tqdm, trange
 
 # Initialize OpenAI
-openai.api_key = 'Openai key'  # Replace with your actual OpenAI API key
+openai.api_key = 'Openai key'  
 
 # Function to extract text from PDF
 def extract_text_from_pdf(file_path):
@@ -38,7 +35,7 @@ def preprocess_data(directory):
 def initialize_weaviate():
     client = weaviate.Client(
         url="URL",  # Weaviate Cloud URL
-        auth_client_secret=weaviate.AuthApiKey(api_key="#####")  # API key
+        auth_client_secret=weaviate.AuthApiKey(api_key=" ")  
     )
     return client
 
