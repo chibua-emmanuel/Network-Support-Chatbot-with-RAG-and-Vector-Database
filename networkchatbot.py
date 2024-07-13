@@ -94,6 +94,53 @@ def main():
         logging.error(f"Error indexing data: {e}")
         st.error("Error indexing data. Please check logs for details.")
 
+    # Custom page style
+    page_style = '''
+    <style>
+    [data-testid="stAppViewContainer"] {
+        background-image: url("https://images.unsplash.com/photo-1487700160041-babef9c3cb55?q=80&w=2052&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8MHx8fA%3D%3D");
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }
+
+    footer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        height: 60px;
+        background-color: rgba(0, 0, 0, 0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        font-size: 20px;
+        z-index: 1000;
+    }
+
+    .user-message {
+        text-align: right;
+        margin-right: 20px;
+        margin-bottom: 10px;
+    }
+
+    .bot-message {
+        text-align: left;
+        margin-left: 20px;
+        margin-bottom: 10px;
+    }
+    </style>
+    '''
+
+    st.markdown(page_style, unsafe_allow_html=True)
+
+    # Add a banner with your name and NU ID
+    st.markdown('<div class="banner"><h2>Network Support Chatbot</h2><p>Created by Emmanuel Chibua | NU ID: 002799484</p></div>', unsafe_allow_html=True)
+
+    # Initialize session state for conversation history
+    if 'history' not in st.session_state:
+        st.session_state.history = []
+
     # Streamlit user interface
     st.title("Network Support Chatbot")
     st.write("Ask your questions about Cisco and Mikrotik devices.")
@@ -112,6 +159,22 @@ def main():
         except Exception as e:
             logging.error(f"Error processing user query: {e}")
             st.error("Error processing user query. Please check logs for details.")
+
+        # Save chat history
+        if 'chat_history' not in st.session_state:
+            st.session_state['chat_history'] = []
+
+        st.session_state['chat_history'].append({"User": user_query, "Bot": response})
+
+        # Display chat history
+        for chat in st.session_state['chat_history']:
+            if chat["User"]:
+                st.markdown(f'<div class="message user-message"><strong>You:</strong> {chat["User"]}</div>', unsafe_allow_html=True)
+            if chat["Bot"]:
+                st.markdown(f'<div class="message bot-message"><strong>Bot:</strong> {chat["Bot"]}</div>', unsafe_allow_html=True)
+
+    # Add a footer
+    st.markdown('<div class="footer">© 2024 Emmanuel Chibua. All rights reserved.</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
