@@ -1,180 +1,78 @@
-import os
 import streamlit as st
-import fitz  # PyMuPDF
-from sentence_transformers import SentenceTransformer
-import weaviate
-from langchain import OpenAI, LLMChain, PromptTemplate
-from langchain.vectorstores import Weaviate as LangChainWeaviate
-from langchain.embeddings import OpenAIEmbeddings
-from tqdm import tqdm
-import logging
+import os
+import glob
+from PyPDF2 import PdfReader
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.prompts import PromptTemplate
+from langchain.chat_models import ChatOpenAI
+from langchain.chains.question_answering import load_qa_chain
+from langchain_openai import OpenAIEmbeddings
 
-# Set OpenAI API key as environment variable
-os.environ["OPENAI_API_KEY"] = "..."
+class RAGSystem:
+    def __init__(self,  openai_api_key: str):
+        self.openai_api_key = openai_api_key
+        self.vector_store = None
+        self.chat_history = [{'role': 'system', 'content': "Assistant is a large language model trained by OpenAI."}]
 
-# Initialize OpenAI with LangChain
-llm = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), model_name='gpt-4')
+    def pdf_to_langchain_document_parser(self, path: str):
+        all_pages = []
+        loader = PyPDFLoader(path)
+        pages = loader.load_and_split()
+        return pages[:10]
 
-# Function to extract text from PDF using PyMuPDF
-def extract_text_from_pdf(file_path):
-    pdf_document = fitz.open(file_path)
-    text = ""
-    for page_num in range(pdf_document.page_count):
-        page = pdf_document.load_page(page_num)
-        text += page.get_text()
-    return text
+    def get_text_chunks(self, text: str):
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+        return text_splitter.split_text(text)
 
-# Extracting text from PDF documents
-def preprocess_data(directory):
-    data = []
-    for filename in os.listdir(directory):
-        if filename.endswith('.pdf'):
-            file_path = os.path.join(directory, filename)
-            try:
-                text = extract_text_from_pdf(file_path)
-                data.append(text)
-            except Exception as e:
-                logging.error(f"Error extracting text from {file_path}: {e}")
-    return data
+    def get_vector_store(self, text_chunks: list):
+        embeddings = OpenAIEmbeddings(openai_api_key = self.openai_api_key)
+        return FAISS.from_documents(text_chunks, embedding=embeddings)
 
-# Initialize the Weaviate client
-def initialize_weaviate():
-    client = weaviate.Client(
-        url="...",  # Weaviate Cloud URL
-        auth_client_secret=weaviate.AuthApiKey(api_key="...")  # API key
-    )
-    return client
+    def get_conversational_chain(self):
+        prompt_template = """
+        You are a knowledgeable subject matter expert in networks and telecommunication specializing in Cisco and Mikrotik devices. Provide helpful and relevant answers based on the given context.
+        Context:\n {context}?\n
+        Question: \n{question}\n
+        Answer:
+        """
+        model = ChatOpenAI(model="gpt-4o", openai_api_key=self.openai_api_key)
+        prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+        return load_qa_chain(model, chain_type="stuff", prompt=prompt)
 
-# Initialize local embedding model with SentenceTransformer
-embedding_model = SentenceTransformer('paraphrase-MiniLM-L6-v2', device='cpu')
+    def user_input(self, user_question: str):
+        if self.vector_store is None:
+            raise Exception("RAG system has not been initialized. Please run initialize_rag first.")
+        self.chat_history.append({'role': 'user', 'content': user_question})
+        docs = self.vector_store.similarity_search(user_question)
+        chain = self.get_conversational_chain()
+        response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
+        self.chat_history.append(response['output_text'])
+        return response
 
-# Preprocess data and index it in Weaviate using LangChain
-def index_data(client, data):
-    for text in tqdm(data, desc="Indexing data"):
-        embedding = embedding_model.encode([text])[0]
-        client.data_object.create(data_object={"text": text}, vector=embedding, class_name="NetworkSupport")
+    def initialize_rag(self, directory: str):
+        pdf_text = ""
+        pdf_docs = self.pdf_to_langchain_document_parser(directory)
+        self.vector_store = self.get_vector_store(pdf_docs)
 
-# Retrieve top K similar documents based on user query using LangChain
-def retrieve_similar_documents(query, client, top_k=3):
-    embedding = embedding_model.encode([query])[0]
-    near_vector = {"vector": embedding, "certainty": 0.7}  # Adjust certainty as needed
-    response = client.query.get("NetworkSupport", ["text"]).with_near_vector(near_vector).with_limit(top_k).do()
-    return response.get("data", {}).get("Get", {}).get("NetworkSupport", [])
-
-# Generate response using LangChain LLMChain with enhanced prompt template
-def generate_response(context, query):
-    prompt_template = (
-        "You are a network support expert specializing in Cisco and Mikrotik devices. "
-        "Based on the following context, provide a detailed and technical answer to the question. "
-        "Use technical terms where appropriate and ensure the explanation is clear and thorough.\n\n"
-        "Context:\n{context}\n\n"
-        "Question:\n{query}\n\n"
-        "Detailed Response:"
-    )
-    prompt = PromptTemplate(input_variables=["context", "query"], template=prompt_template)
-    chain = LLMChain(llm=llm, prompt=prompt)
-    response = chain.run(context=context, query=query)
-    return response
-
-# Preprocess data and initialize Weaviate
+# Streamlit interface
 def main():
-    # Preprocess data
-    cisco_data = preprocess_data("/Users/emmanuelchibua/Downloads/Network RAG pdf/Cisco")
-    mikrotik_data = preprocess_data("/Users/emmanuelchibua/Downloads/Network RAG pdf/Mikrotik")
-    all_data = cisco_data + mikrotik_data
+    st.title("Network Support RAG System- Cisco & Mikrotik")
+    st.write("Developed by Emmanuel Chibua, NU ID: ...)
 
-    # Initialize Weaviate client
-    client = initialize_weaviate()
+    openai_api_key = "..."
+    directory = "/Users.....pdf.pdf"
 
-    # Index data in Weaviate
-    try:
-        index_data(client, all_data)
-        st.success("Data indexing completed successfully.")
-    except Exception as e:
-        logging.error(f"Error indexing data: {e}")
-        st.error("Error indexing data. Please check logs for details.")
+    rag_system = RAGSystem(openai_api_key = openai_api_key)
+    rag_system.initialize_rag(directory)
+    st.success("RAG system initialized successfully!")
 
-    # Custom page style
-    page_style = '''
-    <style>
-    [data-testid="stAppViewContainer"] {
-        background-image: url("https://images.unsplash.com/photo-1487700160041-babef9c3cb55?q=80&w=2052&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8MHx8fA%3D%3D");
-        background-size: cover;
-        background-repeat: no-repeat;
-        background-attachment: fixed;
-    }
+    user_question = st.text_input("Enter your question")
 
-    footer {
-        position: fixed;
-        bottom: 0;
-        width: 100%;
-        height: 60px;
-        background-color: rgba(0, 0, 0, 0.7);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        color: white;
-        font-size: 20px;
-        z-index: 1000;
-    }
-
-    .user-message {
-        text-align: right;
-        margin-right: 20px;
-        margin-bottom: 10px;
-    }
-
-    .bot-message {
-        text-align: left;
-        margin-left: 20px;
-        margin-bottom: 10px;
-    }
-    </style>
-    '''
-
-    st.markdown(page_style, unsafe_allow_html=True)
-
-    # Add a banner with your name and NU ID
-    st.markdown('<div class="banner"><h2>Network Support Chatbot</h2><p>Created by Emmanuel Chibua | NU ID: 002799484</p></div>', unsafe_allow_html=True)
-
-    # Initialize session state for conversation history
-    if 'history' not in st.session_state:
-        st.session_state.history = []
-
-    # Streamlit user interface
-    st.title("Network Support Chatbot")
-    st.write("Ask your questions about Cisco and Mikrotik devices.")
-
-    user_query = st.text_input("Enter your question:")
-    if user_query:
-        try:
-            results = retrieve_similar_documents(user_query, client)
-            if results:
-                context = "\n\n".join([result['text'] for result in results])
-                response = generate_response(context, user_query)
-                st.write("Response from GPT-4:")
-                st.write(response)
-            else:
-                st.write("No relevant records found.")
-        except Exception as e:
-            logging.error(f"Error processing user query: {e}")
-            st.error("Error processing user query. Please check logs for details.")
-
-        # Save chat history
-        if 'chat_history' not in st.session_state:
-            st.session_state['chat_history'] = []
-
-        st.session_state['chat_history'].append({"User": user_query, "Bot": response})
-
-        # Display chat history
-        for chat in st.session_state['chat_history']:
-            if chat["User"]:
-                st.markdown(f'<div class="message user-message"><strong>You:</strong> {chat["User"]}</div>', unsafe_allow_html=True)
-            if chat["Bot"]:
-                st.markdown(f'<div class="message bot-message"><strong>Bot:</strong> {chat["Bot"]}</div>', unsafe_allow_html=True)
-
-    # Add a footer
-    st.markdown('<div class="footer">© 2024 Emmanuel Chibua. All rights reserved.</div>', unsafe_allow_html=True)
+    if st.button("Ask Question"):
+        response = rag_system.user_input(user_question)
+        st.write(response)
 
 if __name__ == "__main__":
     main()
