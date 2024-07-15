@@ -1,5 +1,3 @@
-# Network Support Chatbot with RAG and Vector Database
-
 # Network Support RAG System - Cisco & Mikrotik
 
 Developed by Emmanuel Chibua,
